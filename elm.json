@@ -1,0 +1,40 @@
+{
+    "type": "package",
+    "name": "sthenauth/elm-ui",
+    "summary": "User interface elements and functions for Sthenauth",
+    "license": "Apache-2.0",
+    "version": "0.1.0",
+    "exposed-modules": {
+        "Sthenauth": [
+            "Sthenauth.Login"
+        ],
+        "Sthenauth.Types": [
+            "Sthenauth.Types.Config",
+            "Sthenauth.Types.OidcProvider",
+            "Sthenauth.Types.PostLogin",
+            "Sthenauth.Types.Authenticator",
+            "Sthenauth.Types.Capabilities",
+            "Sthenauth.Types.Credentials",
+            "Sthenauth.Types.AdditionalAuthStep",
+            "Sthenauth.Types.ResponseAuthN",
+            "Sthenauth.Types.Session"
+        ]
+    },
+    "elm-version": "0.19.0 <= v < 0.20.0",
+    "dependencies": {
+        "NoRedInk/elm-json-decode-pipeline": "1.0.0 <= v < 1.1.0",
+        "elm/browser": "1.0.2 <= v < 2.0.0",
+        "elm/core": "1.0.0 <= v < 1.1.0",
+        "elm/html": "1.0.0 <= v < 1.1.0",
+        "elm/http": "2.0.0 <= v < 3.0.0",
+        "elm/json": "1.1.0 <= v < 1.2.0",
+        "elm/time": "1.0.0 <= v < 1.1.0",
+        "elm/url": "1.0.0 <= v < 1.1.0",
+        "elm-community/maybe-extra": "5.2.0 <= v < 5.3.0",
+        "mgold/elm-nonempty-list": "4.1.0 <= v < 4.2.0",
+        "rtfeldman/elm-iso8601-date-strings": "1.1.0 <= v < 1.2.0"
+    },
+    "test-dependencies": {
+        "elm-explorations/test": "1.2.2 <= v < 2.0.0"
+    }
+}

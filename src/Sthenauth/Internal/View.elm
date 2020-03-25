@@ -1,4 +1,4 @@
-module Sthenauth.View exposing (..)
+module Sthenauth.Internal.View exposing (..)
 
 import Html as Html exposing (Html)
 import Html.Attributes as Attr

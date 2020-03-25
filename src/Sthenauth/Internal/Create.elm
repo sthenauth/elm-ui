@@ -1,4 +1,4 @@
-module Sthenauth.Create exposing
+module Sthenauth.Internal.Create exposing
     ( Create
     , Done(..)
     , Msg
@@ -14,7 +14,7 @@ import Http
 import Sthenauth.Types.Config as Config exposing (Config)
 import Sthenauth.Types.Credentials as Credentials exposing (Credentials)
 import Sthenauth.Types.ResponseAuthN as ResponseAuthN exposing (ResponseAuthN)
-import Sthenauth.View as View
+import Sthenauth.Internal.View as View
 
 
 type alias Create a =

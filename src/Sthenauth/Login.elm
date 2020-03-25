@@ -3,7 +3,6 @@ module Sthenauth.Login exposing
     , Msg
     , init
     , isLoggedIn
-    , status
     , update
     , view
     )
@@ -15,21 +14,25 @@ import Html.Attributes as Attr
 import Html.Events as Attr
 import Http
 import Json.Decode
-import Sthenauth.Create as Create exposing (Create)
+import Sthenauth.Internal.Capabilities as Capabilities
+import Sthenauth.Internal.Create as Create exposing (Create)
+import Sthenauth.Internal.OidcProvider as OidcProvider
+import Sthenauth.Internal.View as View
 import Sthenauth.Types.AdditionalAuthStep as AdditionalAuthStep exposing (AdditionalAuthStep)
 import Sthenauth.Types.Capabilities as Capabilities exposing (Capabilities)
 import Sthenauth.Types.Config exposing (Config)
 import Sthenauth.Types.Credentials exposing (Credentials)
+import Sthenauth.Types.OidcProvider exposing (OidcProvider)
 import Sthenauth.Types.PostLogin exposing (PostLogin)
 import Sthenauth.Types.ResponseAuthN as ResponseAuthN exposing (ResponseAuthN)
-import Sthenauth.View as View
 
 
 type alias Login =
-    { loginCapabilities : Maybe Capabilities
-    , loginConfig : Config
-    , loginStatus : LoginStatus
-    , loginCredentials : Credentials
+    { capabilities : Maybe Capabilities
+    , config : Config
+    , status : LoginStatus
+    , credentials : Credentials
+    , afterUrl : Maybe String
     }
 
 
@@ -47,28 +50,32 @@ type Msg
     | AuthNResult (Result Http.Error ResponseAuthN)
     | SetCredentialsName String
     | SetCredentialsPassword String
+    | UseOidcProvider String
     | SendLogout
     | SwitchToCreate
     | MessageForCreate Create.Msg
 
 
-initialLogin : Config -> Login
-initialLogin cfg =
-    { loginCapabilities = Nothing
-    , loginConfig = cfg
-    , loginStatus = NotLoggedIn
-    , loginCredentials = { name = "", password = "" }
+{-| Create an initial login controller.
+
+If the end-user is not logged in, you can provide a URL to send the
+user to after they have logged in. Otherwise they will be taken to
+the default post-login URL.
+
+-}
+initialLogin : Config -> Maybe String -> Login
+initialLogin cfg url =
+    { capabilities = Nothing
+    , config = cfg
+    , status = NotLoggedIn
+    , credentials = { name = "", password = "" }
+    , afterUrl = url
     }
 
 
-status : Login -> LoginStatus
-status { loginStatus } =
-    loginStatus
-
-
-init : Config -> ( Login, Cmd Msg )
-init cfg =
-    ( initialLogin cfg, fetchCapabilities cfg )
+init : Config -> Maybe String -> ( Login, Cmd Msg )
+init cfg url =
+    ( initialLogin cfg url, Capabilities.get cfg LoadCapabilities )
 
 
 update : Msg -> Login -> ( Login, Cmd Msg )
@@ -83,50 +90,55 @@ update msg model =
             ( model, Cmd.none )
 
         LoginWithCredentials ->
-            ( { model | loginStatus = AttemptingLogin }
-            , loginWithCredentials model.loginConfig model.loginCredentials
+            ( { model | status = AttemptingLogin }
+            , loginWithCredentials model.config model.credentials
             )
 
         AuthNResult (Ok res) ->
             responseAuthN res model
 
         AuthNResult (Err _) ->
-            ( { model | loginStatus = LoginFailed }
+            ( { model | status = LoginFailed }
             , Cmd.none
             )
 
         SetCredentialsName s ->
             let
                 cred =
-                    model.loginCredentials
+                    model.credentials
             in
-            ( { model | loginCredentials = { cred | name = s } }
+            ( { model | credentials = { cred | name = s } }
             , Cmd.none
             )
 
         SetCredentialsPassword s ->
             let
                 cred =
-                    model.loginCredentials
+                    model.credentials
             in
-            ( { model | loginCredentials = { cred | password = s } }
+            ( { model | credentials = { cred | password = s } }
             , Cmd.none
             )
 
+        UseOidcProvider pid ->
+            ( { model | status = AttemptingLogin }
+            , OidcProvider.login model.config pid AuthNResult
+            )
+
         SendLogout ->
-            ( model, sendLogout model.loginConfig )
+            ( model, sendLogout model.config )
 
         SwitchToCreate ->
             ( { model
-                | loginStatus =
-                    Create.init model.loginConfig identity
+                | status =
+                    Create.init model.config identity
                         |> SwitchedToCreate
               }
             , Cmd.none
             )
 
         MessageForCreate m ->
-            case model.loginStatus of
+            case model.status of
                 SwitchedToCreate c ->
                     sendToCreate model m c
 
@@ -134,29 +146,11 @@ update msg model =
                     ( model, Cmd.none )
 
 
-view : Login -> Html Msg
-view login =
-    case login.loginStatus of
-        SwitchedToCreate c ->
-            Create.view c |> Html.map MessageForCreate
-
-        _ ->
-            Html.section [ Attr.class "sthenauth", Attr.class "login" ] <|
-                if isLoggedIn login then
-                    [ viewLogout login ]
-
-                else
-                    List.concat
-                        [ viewLoginStatus login.loginStatus
-                        , viewLoginContainer login
-                        ]
-
-
 updateCapabilities : Capabilities -> Login -> Login
 updateCapabilities caps model =
     { model
-        | loginCapabilities = Just caps
-        , loginStatus =
+        | capabilities = Just caps
+        , status =
             Maybe.withDefault NotLoggedIn
                 (Maybe.map (always LoggedIn) caps.existing_session)
     }
@@ -166,22 +160,22 @@ responseAuthN : ResponseAuthN -> Login -> ( Login, Cmd Msg )
 responseAuthN res model =
     case res of
         ResponseAuthN.LoginFailed ->
-            ( { model | loginStatus = LoginFailed }
+            ( { model | status = LoginFailed }
             , Cmd.none
             )
 
         ResponseAuthN.LoggedIn info ->
-            ( { model | loginStatus = LoggedIn }
+            ( { model | status = LoggedIn }
               -- FIXME: This fails because post_login_uri still has
               -- "localhost" set
-            , Navigation.pushUrl model.loginConfig.urlKey info.post_login_uri
+            , Navigation.pushUrl model.config.urlKey info.post_login_url
             )
 
         ResponseAuthN.NextStep step ->
             nextStep step model
 
         ResponseAuthN.LoggedOut ->
-            ( { model | loginStatus = NotLoggedIn }
+            ( { model | status = NotLoggedIn }
             , Cmd.none
             )
 
@@ -193,14 +187,6 @@ nextStep step model =
             ( model
             , Navigation.load url
             )
-
-
-fetchCapabilities : Config -> Cmd Msg
-fetchCapabilities cfg =
-    Http.get
-        { url = cfg.baseUrl ++ "/capabilities"
-        , expect = Http.expectJson LoadCapabilities Capabilities.decoder
-        }
 
 
 loginWithCredentials : Config -> Credentials -> Cmd Msg
@@ -229,7 +215,7 @@ sendToCreate : Login -> Create.Msg -> Create ResponseAuthN -> ( Login, Cmd Msg )
 sendToCreate model msg create =
     case Create.update msg create of
         ( Nothing, new, cmd ) ->
-            ( { model | loginStatus = SwitchedToCreate new }
+            ( { model | status = SwitchedToCreate new }
             , Cmd.map MessageForCreate cmd
             )
 
@@ -237,14 +223,16 @@ sendToCreate model msg create =
             responseAuthN r model
 
         ( Just Create.Canceled, _, _ ) ->
-            ( { model | loginStatus = NotLoggedIn }
+            ( { model | status = NotLoggedIn }
             , Cmd.none
             )
 
 
+{-| Does the end-user currently have an authenticated session?
+-}
 isLoggedIn : Login -> Bool
 isLoggedIn login =
-    case login.loginStatus of
+    case login.status of
         LoggedIn ->
             True
 
@@ -254,7 +242,7 @@ isLoggedIn login =
 
 authInProgress : Login -> Bool
 authInProgress login =
-    case login.loginStatus of
+    case login.status of
         AttemptingLogin ->
             True
 
@@ -264,6 +252,24 @@ authInProgress login =
 
 
 -- VIEW --
+
+
+view : Login -> Html Msg
+view login =
+    case login.status of
+        SwitchedToCreate c ->
+            Create.view c |> Html.map MessageForCreate
+
+        _ ->
+            Html.section [ Attr.class "sthenauth", Attr.class "login" ] <|
+                if isLoggedIn login then
+                    [ viewLogout login ]
+
+                else
+                    List.concat
+                        [ viewLoginStatus login.status
+                        , viewLoginContainer login
+                        ]
 
 
 viewLoginStatus : LoginStatus -> List (Html Msg)
@@ -285,19 +291,40 @@ viewLogout login =
 
 viewLoginContainer : Login -> List (Html Msg)
 viewLoginContainer login =
-    case login.loginCapabilities of
+    case login.capabilities of
         Nothing ->
             [ View.inProgress
             ]
 
-        Just _ ->
-            List.concat
-                [ if authInProgress login then
-                    [ View.inProgress ]
+        Just caps ->
+            if authInProgress login then
+                [ View.inProgress ]
 
-                  else
-                    [ viewLoginForm login ]
-                ]
+            else
+                viewLoginWithCapabilities login caps
+
+
+viewLoginWithCapabilities : Login -> Capabilities -> List (Html Msg)
+viewLoginWithCapabilities login caps =
+    if caps.can_login_with_local_account then
+        viewOidcForm caps (Html.p [] [ Html.text "Or sign in with your email address:" ])
+            ++ [ viewLoginForm login ]
+
+    else
+        viewOidcForm caps (Html.text "")
+
+
+viewOidcForm : Capabilities -> Html Msg -> List (Html Msg)
+viewOidcForm caps other =
+    if List.isEmpty caps.oidc_providers then
+        []
+
+    else
+        [ Html.section [ Attr.class "oidc" ]
+            (List.map (OidcProvider.view UseOidcProvider) caps.oidc_providers
+                ++ [ other ]
+            )
+        ]
 
 
 viewLoginForm : Login -> Html Msg
@@ -305,7 +332,7 @@ viewLoginForm login =
     let
         canCreate =
             Maybe.withDefault False
-                (Maybe.map (\c -> c.can_create_local_account) login.loginCapabilities)
+                (Maybe.map (\c -> c.can_create_local_account) login.capabilities)
 
         createLink =
             if canCreate then
@@ -325,7 +352,7 @@ viewLoginForm login =
                 [ Html.span [] [ Html.text "Username:" ]
                 , Html.input
                     [ Attr.type_ "text"
-                    , Attr.value login.loginCredentials.name
+                    , Attr.value login.credentials.name
                     , Attr.required True
                     , Attr.onInput SetCredentialsName
                     ]
@@ -348,8 +375,8 @@ viewLoginForm login =
                         [ Attr.type_ "submit"
                         , Attr.value "Sign In"
                         , Attr.disabled
-                            (String.isEmpty login.loginCredentials.name
-                                || String.isEmpty login.loginCredentials.password
+                            (String.isEmpty login.credentials.name
+                                || String.isEmpty login.credentials.password
                             )
                         ]
                         []
